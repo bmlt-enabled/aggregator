@@ -32,7 +32,7 @@ resource "aws_ecs_task_definition" "aggregator" {
           },
           {
             name  = "AGGREGATOR_MAX_GEO_WIDTH_KM"
-            value = "160"
+            value = "320"
           },
           {
             name  = "NEW_UI_ENABLED"
@@ -99,6 +99,10 @@ resource "aws_ecs_task_definition" "aggregator" {
           {
             name  = "AGGREGATOR_MODE_ENABLED"
             value = "true"
+          },
+          {
+            name  = "AGGREGATOR_MAX_GEO_WIDTH_KM"
+            value = "320"
           },
           {
             name  = "NEW_UI_ENABLED"

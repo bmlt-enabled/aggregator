@@ -7,7 +7,7 @@ resource "aws_db_instance" "aggregator" {
   identifier          = "aggregator"
   allocated_storage   = 100
   engine              = "mysql"
-  engine_version      = "8.0.35"
+  engine_version      = "8.0.40"
   instance_class      = "db.t3.micro"
   storage_type        = "gp2"
   deletion_protection = true
