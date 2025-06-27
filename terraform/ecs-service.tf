@@ -60,7 +60,8 @@ resource "aws_ecs_task_definition" "aggregator" {
           }
         ]
         workingDirectory = "/tmp"
-        image            = "bmltenabled/bmlt-root-server:aggregator"
+        image            = "bmltenabled/bmlt-server:aggregator"
+        imagePullPolicy  = "ALWAYS"
         repositoryCredentials = {
           credentialsParameter = data.aws_secretsmanager_secret.docker.arn
         }
@@ -101,10 +102,6 @@ resource "aws_ecs_task_definition" "aggregator" {
             value = "true"
           },
           {
-            name  = "AGGREGATOR_MAX_GEO_WIDTH_KM"
-            value = "320"
-          },
-          {
             name  = "NEW_UI_ENABLED"
             value = "false"
           },
@@ -130,7 +127,8 @@ resource "aws_ecs_task_definition" "aggregator" {
           }
         ]
         workingDirectory = "/tmp"
-        image            = "bmltenabled/bmlt-root-server:aggregator"
+        image            = "bmltenabled/bmlt-server:aggregator"
+        imagePullPolicy  = "ALWAYS"
         repositoryCredentials = {
           credentialsParameter = data.aws_secretsmanager_secret.docker.arn
         },
@@ -207,7 +205,8 @@ resource "aws_ecs_task_definition" "aggregator_import" {
           }
         ]
         workingDirectory = "/tmp"
-        image            = "bmltenabled/bmlt-root-server:aggregator"
+        image            = "bmltenabled/bmlt-server:aggregator"
+        imagePullPolicy  = "ALWAYS"
         repositoryCredentials = {
           credentialsParameter = data.aws_secretsmanager_secret.docker.arn
         }
@@ -252,7 +251,7 @@ resource "aws_ecs_service" "aggregator" {
     field = "attribute:ecs.availability-zone"
   }
 
-  #  lifecycle {
-  #    ignore_changes = [task_definition]
-  #  }
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
 }
