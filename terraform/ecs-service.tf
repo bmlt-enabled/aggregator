@@ -212,7 +212,7 @@ resource "aws_ecs_task_definition" "aggregator_import" {
         }
         command = [
           "/bin/bash",
-          "/tmp/aggregator-import-root-servers.sh"
+          "/tmp/aggregator-import-servers.sh"
         ]
         logConfiguration = {
           logDriver = "awslogs"
