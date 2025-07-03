@@ -9,7 +9,7 @@ resource "aws_ssm_document" "aggregator_refresh_asg" {
       action = "aws:executeScript"
       name   = "RefreshASG"
       inputs = {
-        Runtime = "python3.8"
+        Runtime = "python3.11"
         Handler = "main"
         Script  = <<-EOT
                       def main(events, context):
