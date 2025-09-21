@@ -180,6 +180,10 @@ resource "aws_ecs_task_definition" "aggregator_import" {
             value = "true"
           },
           {
+            name  = "LOG_CHANNEL"
+            value = "errorlog"
+          },
+          {
             name  = "NEW_UI_ENABLED"
             value = "false"
           },
