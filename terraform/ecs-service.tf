@@ -98,6 +98,10 @@ resource "aws_ecs_task_definition" "aggregator" {
             value = var.GOOGLE_API_KEY
           },
           {
+            name  = "LOG_CHANNEL"
+            value = "errorlog"
+          },
+          {
             name  = "AGGREGATOR_MODE_ENABLED"
             value = "true"
           },
