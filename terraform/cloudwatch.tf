@@ -19,19 +19,19 @@ resource "aws_cloudwatch_event_rule" "aggregator_import" {
   schedule_expression = "rate(4 hours)"
 }
 
-resource "aws_cloudwatch_event_target" "aggregator_import" {
-  target_id = "aggregator-import"
-  arn       = aws_ecs_cluster.aggregator.arn
-  rule      = aws_cloudwatch_event_rule.aggregator_import.name
-  role_arn  = aws_iam_role.ecs_events.arn
-
-  ecs_target {
-    task_count          = 1
-    task_definition_arn = aws_ecs_task_definition.aggregator_import.arn
-    launch_type         = "EC2"
-    propagate_tags      = "TASK_DEFINITION"
-  }
-}
+# resource "aws_cloudwatch_event_target" "aggregator_import" {
+#   target_id = "aggregator-import"
+#   arn       = aws_ecs_cluster.aggregator.arn
+#   rule      = aws_cloudwatch_event_rule.aggregator_import.name
+#   role_arn  = aws_iam_role.ecs_events.arn
+#
+#   ecs_target {
+#     task_count          = 1
+#     task_definition_arn = aws_ecs_task_definition.aggregator_import.arn
+#     launch_type         = "EC2"
+#     propagate_tags      = "TASK_DEFINITION"
+#   }
+# }
 
 data "aws_iam_policy_document" "ecs_events" {
   statement {

@@ -3,20 +3,20 @@ resource "aws_db_subnet_group" "aggregator" {
   subnet_ids = data.aws_subnets.main.ids
 }
 
-resource "aws_db_instance" "aggregator" {
-  identifier          = "aggregator"
-  allocated_storage   = 100
-  engine              = "mysql"
-  engine_version      = "8.0.40"
-  instance_class      = "db.t3.micro"
-  storage_type        = "gp2"
-  deletion_protection = true
-  multi_az            = false
-  db_name             = "aggregator"
-  username            = "aggregator"
-  password            = var.rds_password
-  port                = 3306
-
+resource "aws_db_instance" "bmlt_aggregator" {
+  identifier              = "bmlt-aggregator"
+  allocated_storage       = 100
+  engine                  = "mysql"
+  engine_version          = "8.0.40"
+  instance_class          = "db.t3.micro"
+  storage_type            = "gp3"
+  deletion_protection     = true
+  multi_az                = false
+  db_name                 = "aggregator"
+  username                = "aggregator"
+  password                = var.rds_password
+  port                    = 3306
+  snapshot_identifier     = "rds:aggregator-2025-10-19-03-31"
   apply_immediately       = true
   publicly_accessible     = true
   vpc_security_group_ids  = [data.aws_security_group.rds_mysql.id]
@@ -26,7 +26,7 @@ resource "aws_db_instance" "aggregator" {
   skip_final_snapshot = false
 
   tags = {
-    Name = "aggregator"
+    Name = "bmlt-aggregator"
   }
 
   lifecycle {

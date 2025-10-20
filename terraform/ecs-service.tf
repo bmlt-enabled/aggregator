@@ -52,7 +52,7 @@ resource "aws_ecs_task_definition" "aggregator" {
           },
           {
             name  = "DB_HOST"
-            value = aws_db_instance.aggregator.address
+            value = aws_db_instance.bmlt_aggregator.address
           },
           {
             name  = "DB_PREFIX"
@@ -123,7 +123,7 @@ resource "aws_ecs_task_definition" "aggregator" {
           },
           {
             name  = "DB_HOST"
-            value = aws_db_instance.aggregator.address
+            value = aws_db_instance.bmlt_aggregator.address
           },
           {
             name  = "DB_PREFIX"
@@ -205,7 +205,7 @@ resource "aws_ecs_task_definition" "aggregator_import" {
           },
           {
             name  = "DB_HOST"
-            value = aws_db_instance.aggregator.address
+            value = aws_db_instance.bmlt_aggregator.address
           },
           {
             name  = "DB_PREFIX"
