@@ -7,7 +7,7 @@ resource "aws_db_instance" "bmlt_aggregator" {
   identifier              = "bmlt-aggregator"
   allocated_storage       = 100
   engine                  = "mysql"
-  engine_version          = "8.0.40"
+  engine_version          = "8.0.42"
   instance_class          = "db.t3.micro"
   storage_type            = "gp3"
   deletion_protection     = true

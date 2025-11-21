@@ -47,6 +47,10 @@ resource "aws_ecs_task_definition" "aggregator" {
             value = "aggregator"
           },
           {
+            name  = "DB_USERNAME"
+            value = "aggregator"
+          },
+          {
             name  = "DB_PASSWORD"
             value = var.rds_password
           },
@@ -111,6 +115,10 @@ resource "aws_ecs_task_definition" "aggregator" {
           },
           {
             name  = "DB_DATABASE"
+            value = "aggregator"
+          },
+          {
+            name  = "DB_USERNAME"
             value = "aggregator"
           },
           {
@@ -197,6 +205,10 @@ resource "aws_ecs_task_definition" "aggregator_import" {
           },
           {
             name  = "DB_USER"
+            value = "aggregator"
+          },
+          {
+            name  = "DB_USERNAME"
             value = "aggregator"
           },
           {
