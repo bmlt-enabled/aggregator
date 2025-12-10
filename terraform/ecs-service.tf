@@ -23,7 +23,7 @@ resource "aws_ecs_task_definition" "aggregator" {
         ]
         environment = [
           {
-            name  = "GKEY"
+            name  = "GOOGLE_API_KEY"
             value = var.GOOGLE_API_KEY
           },
           {
@@ -70,8 +70,9 @@ resource "aws_ecs_task_definition" "aggregator" {
           credentialsParameter = data.aws_secretsmanager_secret.docker.arn
         }
         command = [
-          "/bin/bash",
-          "/tmp/start-bmlt.sh"
+          "apachectl",
+          "-D",
+          "FOREGROUND"
         ]
         logConfiguration = {
           logDriver = "awslogs",
@@ -145,8 +146,9 @@ resource "aws_ecs_task_definition" "aggregator" {
           credentialsParameter = data.aws_secretsmanager_secret.docker.arn
         },
         command = [
-          "/bin/bash",
-          "/tmp/aggregator-initialize-database.sh"
+          "/usr/bin/php",
+          "/var/www/html/main_server/artisan",
+          "aggregator:InitializeDatabase"
         ]
         logConfiguration = {
           logDriver = "awslogs"
@@ -184,7 +186,7 @@ resource "aws_ecs_task_definition" "aggregator_import" {
         essential = true
         environment = [
           {
-            name  = "GKEY"
+            name  = "GOOGLE_API_KEY"
             value = var.GOOGLE_API_KEY
           },
           {
@@ -231,8 +233,9 @@ resource "aws_ecs_task_definition" "aggregator_import" {
           credentialsParameter = data.aws_secretsmanager_secret.docker.arn
         }
         command = [
-          "/bin/bash",
-          "/tmp/aggregator-import-servers.sh"
+          "/usr/bin/php",
+          "/var/www/html/main_server/artisan",
+          "aggregator:ImportRootServers"
         ]
         logConfiguration = {
           logDriver = "awslogs"
