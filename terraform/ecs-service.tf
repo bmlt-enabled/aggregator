@@ -194,6 +194,10 @@ resource "aws_ecs_task_definition" "aggregator_import" {
             value = "true"
           },
           {
+            name  = "AGGREGATOR_USER_AGENT"
+            value = "'Mozilla/5.0 (X11; Linux x86_64; rv:146.0) Gecko/20100101 Firefox/146.0 +aggregator"
+          },
+          {
             name  = "LOG_CHANNEL"
             value = "errorlog"
           },
