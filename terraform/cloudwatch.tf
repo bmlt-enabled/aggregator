@@ -26,10 +26,16 @@ resource "aws_cloudwatch_event_target" "aggregator_import" {
   role_arn  = aws_iam_role.ecs_events.arn
 
   ecs_target {
-    task_count          = 1
-    task_definition_arn = aws_ecs_task_definition.aggregator_import.arn
-    launch_type         = "EC2"
-    propagate_tags      = "TASK_DEFINITION"
+    task_count             = 1
+    task_definition_arn    = aws_ecs_task_definition.aggregator_import.arn
+    launch_type            = "FARGATE"
+    enable_execute_command = true
+
+    network_configuration {
+      subnets          = data.aws_subnets.main.ids
+      security_groups  = [aws_security_group.ecs_fargate_tasks.id]
+      assign_public_ip = true
+    }
   }
 }
 
