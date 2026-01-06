@@ -168,9 +168,13 @@ resource "aws_ecs_task_definition" "aggregator" {
 }
 
 resource "aws_ecs_task_definition" "aggregator_import" {
-  family             = "aggregator-import"
-  task_role_arn      = data.aws_iam_role.ecs_task.arn
-  execution_role_arn = data.aws_iam_role.ecs_task.arn
+  family                   = "aggregator-import"
+  task_role_arn            = data.aws_iam_role.ecs_task.arn
+  execution_role_arn       = data.aws_iam_role.ecs_task.arn
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "512"  # 0.5 vCPU
+  memory                   = "1024" # 1 GB
 
   container_definitions = jsonencode(
     [
@@ -178,7 +182,6 @@ resource "aws_ecs_task_definition" "aggregator_import" {
         name = "aggregator-import"
         portMappings = [
           {
-            hostPort      = 0
             containerPort = 8000
             protocol      = "tcp"
           }
@@ -238,6 +241,7 @@ resource "aws_ecs_task_definition" "aggregator_import" {
         }
         command = [
           "/usr/bin/php",
+          "-d", "memory_limit=900M",
           "/var/www/html/main_server/artisan",
           "aggregator:ImportRootServers"
         ]
@@ -249,7 +253,7 @@ resource "aws_ecs_task_definition" "aggregator_import" {
             awslogs-stream-prefix = "daemon"
           }
         }
-        memoryReservation = 320
+        memory = 1024
         linuxParameters = {
           initProcessEnabled = true
         }
