@@ -140,6 +140,55 @@ resource "aws_sns_topic" "lb_hosts" {
   }
 }
 
+resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
+  alarm_name          = "aggregator-ecs-memory-utilization-high"
+  alarm_description   = "ECS task memory utilization above 80% for 5 minutes"
+  actions_enabled     = true
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "MemoryUtilization"
+  namespace           = "AWS/ECS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    ServiceName = aws_ecs_service.aggregator.name
+    ClusterName = aws_ecs_cluster.aggregator.name
+  }
+
+  alarm_actions = [aws_sns_topic.lb_hosts.arn]
+
+  tags = {
+    Name = "aggregator"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "ec2_memory_high" {
+  alarm_name          = "aggregator-ec2-memory-utilization-high"
+  alarm_description   = "EC2 instance memory utilization above 85%"
+  actions_enabled     = true
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "mem_used_percent"
+  namespace           = "CWAgent"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 85
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.aggregator_cluster.name
+  }
+
+  alarm_actions = [aws_sns_topic.lb_hosts.arn]
+
+  tags = {
+    Name = "aggregator"
+  }
+}
+
 resource "aws_cloudwatch_event_rule" "aggregator_ecs_state" {
   name        = "aggregator-ecs-state-stop"
   description = "Get each time a aggregator task stops"

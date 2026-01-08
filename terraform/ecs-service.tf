@@ -70,9 +70,9 @@ resource "aws_ecs_task_definition" "aggregator" {
           credentialsParameter = data.aws_secretsmanager_secret.docker.arn
         }
         command = [
-          "apachectl",
-          "-D",
-          "FOREGROUND"
+          "/bin/bash",
+          "-c",
+          "echo 'memory_limit = 512M' > /etc/php/8.2/apache2/conf.d/99-custom.ini && apachectl -D FOREGROUND"
         ]
         logConfiguration = {
           logDriver = "awslogs",
@@ -82,7 +82,8 @@ resource "aws_ecs_task_definition" "aggregator" {
             awslogs-stream-prefix = "aggregator"
           }
         }
-        memoryReservation = 1280
+        memory            = 1280
+        memoryReservation = 768
         linuxParameters = {
           initProcessEnabled = true
         }
@@ -158,7 +159,8 @@ resource "aws_ecs_task_definition" "aggregator" {
             awslogs-stream-prefix = "init"
           }
         }
-        memoryReservation = 256
+        memory            = 256
+        memoryReservation = 192
         linuxParameters = {
           initProcessEnabled = true
         }
@@ -241,7 +243,7 @@ resource "aws_ecs_task_definition" "aggregator_import" {
         }
         command = [
           "/usr/bin/php",
-          "-d", "memory_limit=900M",
+          "-d", "memory_limit=512M",
           "/var/www/html/main_server/artisan",
           "aggregator:ImportRootServers"
         ]

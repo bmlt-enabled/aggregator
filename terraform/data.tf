@@ -104,6 +104,24 @@ locals {
         }
       }
     }
+    metrics = {
+      namespace = "CWAgent"
+      metrics_collected = {
+        mem = {
+          measurement = [
+            {
+              name   = "mem_used_percent"
+              rename = "MemoryUtilization"
+              unit   = "Percent"
+            }
+          ]
+          metrics_collection_interval = 60
+        }
+      }
+      aggregation_dimensions = [
+        ["AutoScalingGroupName"]
+      ]
+    }
   }
 }
 
