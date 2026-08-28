@@ -7,7 +7,7 @@ resource "aws_db_instance" "bmlt_aggregator" {
   identifier                  = "bmlt-aggregator"
   allocated_storage           = 100
   engine                      = "mysql"
-  engine_version              = "8.4.7"
+  engine_version              = "8.4.8"
   allow_major_version_upgrade = true
   instance_class              = "db.t3.micro"
   storage_type                = "gp3"
