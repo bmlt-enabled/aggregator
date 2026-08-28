@@ -28,8 +28,12 @@ resource "aws_cloudwatch_event_target" "aggregator_import" {
   ecs_target {
     task_count             = 1
     task_definition_arn    = aws_ecs_task_definition.aggregator_import.arn
-    launch_type            = "FARGATE"
     enable_execute_command = true
+
+    capacity_provider_strategy {
+      capacity_provider = "FARGATE_SPOT"
+      weight            = 1
+    }
 
     network_configuration {
       subnets          = data.aws_subnets.main.ids
@@ -95,36 +99,9 @@ resource "aws_cloudwatch_metric_alarm" "lb_hosts_lt_2" {
     "TargetGroup"  = aws_lb_target_group.aggregator.arn_suffix
   }
 
-  alarm_actions             = [aws_sns_topic.lb_hosts.arn]
-  ok_actions                = [aws_sns_topic.lb_hosts.arn]
-  insufficient_data_actions = []
-
-  tags = {
-    Name = "aggregator"
-  }
-}
-
-resource "aws_cloudwatch_metric_alarm" "lb_hosts_lt_1" {
-  alarm_name          = "aggregator-lb-unhealthy-hosts-lt-1"
-  alarm_description   = "healthy hosts less than 1 for an 5 minutes"
-  actions_enabled     = true
-  comparison_operator = "LessThanThreshold"
-  datapoints_to_alarm = 1
-  evaluation_periods  = 1
-  period              = 300
-  threshold           = 1
-  statistic           = "Maximum"
-  treat_missing_data  = "missing"
-  metric_name         = "HealthyHostCount"
-  namespace           = "AWS/ApplicationELB"
-
-  dimensions = {
-    "LoadBalancer" = data.aws_lb.main.arn_suffix
-    "TargetGroup"  = aws_lb_target_group.aggregator.arn_suffix
-  }
-
-  alarm_actions             = [aws_sns_topic.lb_hosts.arn]
-  ok_actions                = [aws_sns_topic.lb_hosts.arn]
+  alarm_actions = [aws_sns_topic.lb_hosts.arn]
+  # Dont alert on recovery, reduce noise
+  # ok_actions                = [aws_sns_topic.lb_hosts.arn]
   insufficient_data_actions = []
 
   tags = {
@@ -142,10 +119,11 @@ resource "aws_sns_topic" "lb_hosts" {
 
 resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
   alarm_name          = "aggregator-ecs-memory-utilization-high"
-  alarm_description   = "ECS task memory utilization above 80% for 5 minutes"
+  alarm_description   = "ECS task memory utilization above 80% for 15 minutes"
   actions_enabled     = true
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 2
+  datapoints_to_alarm = 3
+  evaluation_periods  = 3
   metric_name         = "MemoryUtilization"
   namespace           = "AWS/ECS"
   period              = 300
@@ -167,10 +145,11 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
 
 resource "aws_cloudwatch_metric_alarm" "ec2_memory_high" {
   alarm_name          = "aggregator-ec2-memory-utilization-high"
-  alarm_description   = "EC2 instance memory utilization above 85%"
+  alarm_description   = "EC2 instance memory utilization above 85% for 15 minutes"
   actions_enabled     = true
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 2
+  datapoints_to_alarm = 3
+  evaluation_periods  = 3
   metric_name         = "mem_used_percent"
   namespace           = "CWAgent"
   period              = 300
@@ -191,7 +170,7 @@ resource "aws_cloudwatch_metric_alarm" "ec2_memory_high" {
 
 resource "aws_cloudwatch_event_rule" "aggregator_ecs_state" {
   name        = "aggregator-ecs-state-stop"
-  description = "Get each time a aggregator task stops"
+  description = "Alert when an aggregator task stops due to failure"
 
   event_pattern = jsonencode(
     {
@@ -205,11 +184,15 @@ resource "aws_cloudwatch_event_rule" "aggregator_ecs_state" {
         clusterArn = [
           aws_ecs_cluster.aggregator.arn
         ]
-        containers = {
-          lastStatus = [
-            "STOPPED"
-          ]
-        }
+        lastStatus = [
+          "STOPPED"
+        ]
+        # Only real failures. Excludes normal deploys/scale-downs
+        # (ServiceSchedulerInitiated), Spot interruptions, and manual stops.
+        stopCode = [
+          "EssentialContainerExited",
+          "TaskFailedToStart"
+        ]
         group = [
           "service:${aws_ecs_task_definition.aggregator.family}"
         ]

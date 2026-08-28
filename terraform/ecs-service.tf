@@ -3,6 +3,11 @@ resource "aws_ecs_task_definition" "aggregator" {
   task_role_arn      = data.aws_iam_role.ecs_task.arn
   execution_role_arn = data.aws_iam_role.ecs_task.arn
 
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
+
   container_definitions = jsonencode(
     [
       {
@@ -267,7 +272,7 @@ resource "aws_ecs_task_definition" "aggregator_import" {
 resource "aws_ecs_service" "aggregator" {
   name                               = "aggregator"
   cluster                            = aws_ecs_cluster.aggregator.id
-  desired_count                      = 2
+  desired_count                      = 3
   iam_role                           = data.aws_iam_role.ecs_service.name
   task_definition                    = aws_ecs_task_definition.aggregator.arn
   enable_execute_command             = true

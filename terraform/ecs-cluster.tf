@@ -2,16 +2,39 @@ resource "aws_ecs_cluster" "aggregator" {
   name = "aggregator"
 }
 
+resource "aws_ecs_cluster_capacity_providers" "aggregator" {
+  cluster_name       = aws_ecs_cluster.aggregator.name
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+}
+
 resource "aws_autoscaling_group" "aggregator_cluster" {
   name                = local.aggregator_cluster_name
   vpc_zone_identifier = data.aws_subnets.main.ids
-  min_size            = 2
-  max_size            = 2
-  desired_capacity    = 2
+  min_size            = 3
+  max_size            = 3
+  desired_capacity    = 3
 
-  launch_template {
-    id      = aws_launch_template.aggregator_cluster.id
-    version = "$Latest"
+  capacity_rebalance = true
+
+  mixed_instances_policy {
+    instances_distribution {
+      on_demand_base_capacity                  = 0
+      on_demand_percentage_above_base_capacity = 0
+      spot_allocation_strategy                 = "capacity-optimized"
+    }
+
+    launch_template {
+      launch_template_specification {
+        launch_template_id = aws_launch_template.aggregator_cluster.id
+        version            = "$Latest"
+      }
+      override {
+        instance_type = "t4g.small"
+      }
+      override {
+        instance_type = "t4g.medium"
+      }
+    }
   }
 
   dynamic "tag" {
@@ -44,7 +67,7 @@ locals {
 resource "aws_launch_template" "aggregator_cluster" {
   name_prefix            = local.aggregator_cluster_name
   image_id               = data.aws_ami.ecs.image_id
-  instance_type          = "t3a.small"
+  instance_type          = "t4g.small"
   key_name               = data.aws_key_pair.this.key_name
   user_data              = data.cloudinit_config.aggregator_cluster.rendered
   update_default_version = true
@@ -88,6 +111,5 @@ resource "aws_launch_template" "aggregator_cluster" {
 
   lifecycle {
     create_before_destroy = true
-    ignore_changes        = [image_id]
   }
 }
