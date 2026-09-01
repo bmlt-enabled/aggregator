@@ -18,9 +18,10 @@ resource "aws_autoscaling_group" "aggregator_cluster" {
 
   mixed_instances_policy {
     instances_distribution {
-      on_demand_base_capacity                  = 0
+      # Guarantee 1 on-demand instance, the other 2 come from Spots when available
+      on_demand_base_capacity                  = 1
       on_demand_percentage_above_base_capacity = 0
-      spot_allocation_strategy                 = "capacity-optimized"
+      spot_allocation_strategy                 = "price-capacity-optimized"
     }
 
     launch_template {
@@ -33,6 +34,21 @@ resource "aws_autoscaling_group" "aggregator_cluster" {
       }
       override {
         instance_type = "t4g.medium"
+      }
+      override {
+        instance_type = "t4g.large"
+      }
+      override {
+        instance_type = "m6g.large"
+      }
+      override {
+        instance_type = "m7g.large"
+      }
+      override {
+        instance_type = "c6g.large"
+      }
+      override {
+        instance_type = "c7g.large"
       }
     }
   }
