@@ -82,17 +82,21 @@ resource "aws_iam_role_policy" "ecs_events_run_task_with_any_role" {
 
 resource "aws_cloudwatch_metric_alarm" "lb_hosts_lt_2" {
   alarm_name          = "aggregator-lb-unhealthy-hosts-lt-2"
-  alarm_description   = "healthy hosts less than 2 for an 20 minutes"
+  alarm_description   = "fewer than 2 healthy hosts, or no targets registered, for 5 minutes"
   actions_enabled     = true
   comparison_operator = "LessThanThreshold"
   datapoints_to_alarm = 1
   evaluation_periods  = 1
-  period              = 1200
+  period              = 300
   threshold           = 2
   statistic           = "Maximum"
-  treat_missing_data  = "missing"
-  metric_name         = "HealthyHostCount"
-  namespace           = "AWS/ApplicationELB"
+  # "breaching" so a total outage still alarms: when all targets deregister the
+  # ALB stops emitting HealthyHostCount (it never reports 0 with no targets), so
+  # "missing" would silently hold OK — which is exactly why the 2026-09-01
+  # outage sent no page.
+  treat_missing_data = "breaching"
+  metric_name        = "HealthyHostCount"
+  namespace          = "AWS/ApplicationELB"
 
   dimensions = {
     "LoadBalancer" = data.aws_lb.main.arn_suffix
