@@ -1,5 +1,10 @@
 resource "aws_ecs_cluster" "aggregator" {
   name = "aggregator"
+
+  setting {
+    name  = "containerInsights"
+    value = "enhanced"
+  }
 }
 
 resource "aws_ecs_cluster_capacity_providers" "aggregator" {
