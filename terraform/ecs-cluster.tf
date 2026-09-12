@@ -3,7 +3,7 @@ resource "aws_ecs_cluster" "aggregator" {
 
   setting {
     name  = "containerInsights"
-    value = "enhanced"
+    value = "disabled"
   }
 }
 
