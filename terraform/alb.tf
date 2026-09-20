@@ -5,9 +5,14 @@ resource "aws_lb_target_group" "aggregator" {
   vpc_id               = data.aws_vpc.main.id
   deregistration_delay = 5
 
+  # defaults (30s x 3) keep routing to a dead Spot host for up to 90s
   health_check {
-    path    = "/"
-    matcher = "200"
+    path                = "/"
+    matcher             = "200"
+    interval            = 10
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
   }
 }
 

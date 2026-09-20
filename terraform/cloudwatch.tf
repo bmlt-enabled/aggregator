@@ -35,10 +35,12 @@ resource "aws_cloudwatch_event_target" "aggregator_import" {
       weight            = 1
     }
 
+    # Behind the NAT instance so the import always reaches root servers from one address. A Fargate task can't
+    # hold an Elastic IP, and some root servers only answer an allow-listed address.
     network_configuration {
-      subnets          = data.aws_subnets.main.ids
+      subnets          = [data.aws_subnet.private_nat.id]
       security_groups  = [aws_security_group.ecs_fargate_tasks.id]
-      assign_public_ip = true
+      assign_public_ip = false
     }
   }
 }

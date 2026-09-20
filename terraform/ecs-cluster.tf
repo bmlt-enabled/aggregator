@@ -9,7 +9,24 @@ resource "aws_ecs_cluster" "aggregator" {
 
 resource "aws_ecs_cluster_capacity_providers" "aggregator" {
   cluster_name       = aws_ecs_cluster.aggregator.name
-  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+  capacity_providers = ["FARGATE", "FARGATE_SPOT", aws_ecs_capacity_provider.aggregator.name]
+}
+
+# Only here for managed draining: ECS puts a termination lifecycle hook on the ASG and drains the instance
+# before the ASG kills it. Capacity Rebalance terminates the old Spot host as soon as its replacement is
+# InService, which has no interruption warning for the agent to react to. The ASG stays fixed at 3.
+resource "aws_ecs_capacity_provider" "aggregator" {
+  name = "aggregator-asg"
+
+  auto_scaling_group_provider {
+    auto_scaling_group_arn         = aws_autoscaling_group.aggregator_cluster.arn
+    managed_draining               = "ENABLED"
+    managed_termination_protection = "DISABLED"
+
+    managed_scaling {
+      status = "DISABLED"
+    }
+  }
 }
 
 resource "aws_autoscaling_group" "aggregator_cluster" {
@@ -60,6 +77,11 @@ resource "aws_autoscaling_group" "aggregator_cluster" {
 
   dynamic "tag" {
     for_each = [
+      {
+        # ECS adds this when the ASG is attached to a capacity provider
+        key   = "AmazonECSManaged"
+        value = "true"
+      },
       {
         key   = "Name"
         value = "aggregator"

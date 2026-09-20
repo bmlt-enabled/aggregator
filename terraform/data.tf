@@ -57,6 +57,18 @@ data "aws_subnet" "main" {
   id       = each.value
 }
 
+# Private subnet whose default route is bmlt-nat-instance, so anything in it leaves as the NAT's Elastic IP
+# (18.204.159.39). Only the "b" subnet: the NAT instance is in us-east-1b, and a task in "a" would pay
+# cross-AZ transfer on every image pull and import.
+data "aws_subnet" "private_nat" {
+  vpc_id = data.aws_vpc.main.id
+
+  filter {
+    name   = "tag:Name"
+    values = ["bmlt-private-b"]
+  }
+}
+
 data "aws_db_subnet_group" "bmlt" {
   name = "bmlt"
 }
@@ -133,6 +145,8 @@ data "cloudinit_config" "aggregator_cluster" {
 set -e
 
 echo ECS_CLUSTER=${local.aggregator_cluster_name} >> /etc/ecs/ecs.config
+# on the 2 minute Spot interruption warning, set the instance to DRAINING so tasks leave the ALB before the host dies
+echo ECS_ENABLE_SPOT_INSTANCE_DRAINING=true >> /etc/ecs/ecs.config
 
 dnf install -y amazon-cloudwatch-agent
 
