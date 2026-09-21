@@ -55,7 +55,7 @@ resource "aws_lb_listener_rule" "aggregator_xml_gone" {
 # meeting-registry/0.1 downloads the whole dataset in 60 slices, 8 times a day: 22% of all bytes and 19% of all
 # backend time from one client (TOP_CLIENTS_FINDINGS.md, HARVESTERS.md). Its user agent says "contact in repo
 # README" but the repo is not public and the address is a bare VPS, so the response to its own requests is the
-# only way to reach the operator. Remove this rule once they have been in touch and have a cheaper export.
+# only way to reach the operator. Remove this rule once they have been in touch and have a more efficient export.
 resource "aws_lb_listener_rule" "aggregator_meeting_registry" {
   listener_arn = data.aws_lb_listener.main_443.arn
   priority     = 2
@@ -66,7 +66,7 @@ resource "aws_lb_listener_rule" "aggregator_meeting_registry" {
     fixed_response {
       content_type = "text/plain"
       status_code  = "403"
-      message_body = "meeting-registry: your client downloads the full BMLT aggregator dataset 8 times a day, which is about a fifth of this volunteer-run server's capacity. We would like to help you get the data more cheaply. Please email admin@bmlt.app and we will unblock you."
+      message_body = "meeting-registry: your client downloads the full BMLT aggregator dataset 8 times a day, which is about a fifth of this volunteer-run server's capacity. We would like to help you get the data more efficiently. Please email admin@bmlt.app and we will unblock you."
     }
   }
 
