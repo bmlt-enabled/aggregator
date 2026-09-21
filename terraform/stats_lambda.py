@@ -274,8 +274,12 @@ MONTHLY = {
     "app_versions": (("app", "os", "version"), ("requests",)),
     "hourly": (("hour",), ("requests", *(f"{p}_requests" for p in APPS))),
     "locations": (("lat", "lng"), ("searches", *(f"{p}_searches" for p in APPS))),
-    "geo": (("country", "region", "city", "lat", "lng"), ("requests", *(f"{p}_requests" for p in APPS))),
+    "geo": (("country", "region", "city", "lat", "lng"), ("requests", "ip_days", *(f"{p}_requests" for p in APPS), *(f"{p}_ip_days" for p in APPS))),
 }
+# A place's distinct IPs can't be added across days, but its IP-days can: the sum of each day's count. Divided by
+# the days in a range that is "average daily IPs", which ranks places by people rather than by requests, so one
+# busy server no longer puts its datacenter's city at the top. Summed field -> the daily field it is summed from.
+MONTHLY_FROM = {"ip_days": "unique_ips", **{f"{p}_ip_days": f"{p}_unique_ips" for p in APPS}}
 MONTHLY_LIMIT = 3000
 
 
@@ -289,7 +293,7 @@ def build_month(month, days):
             for item in doc.get(name, []):
                 total = totals[name].setdefault(tuple(item.get(k) for k in keys), dict.fromkeys(sums, 0))
                 for field in sums:
-                    total[field] += item.get(field) or 0  # older files lack newer apps' fields
+                    total[field] += item.get(MONTHLY_FROM.get(field, field)) or 0  # older files lack newer apps' fields
         for item in doc["request_kinds"]:
             k = kinds.setdefault((item["scope"], item["request_kind"]), {"requests": 0, "errors_5xx": 0, "timed": 0, "p50": 0, "p95": 0})
             k["requests"] += item["requests"]
