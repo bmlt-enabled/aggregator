@@ -8,6 +8,8 @@
 *.tfstate.backup
 venv
 *.zip
+docs/*
+!docs/responsible-use.md
 
 CONTAINER_INSIGHTS_FINDINGS.md
 EXPENSIVE_QUERIES.md

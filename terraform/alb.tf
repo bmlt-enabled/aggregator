@@ -66,7 +66,7 @@ resource "aws_lb_listener_rule" "aggregator_meeting_registry" {
     fixed_response {
       content_type = "text/plain"
       status_code  = "403"
-      message_body = "meeting-registry: your client downloads the full BMLT aggregator dataset 8 times a day, which is about a fifth of this volunteer-run server's capacity. We would like to help you get the data more efficiently. Please email admin@bmlt.app and we will unblock you."
+      message_body = "meeting-registry: your client downloads the full BMLT aggregator dataset 8 times a day, which is about a fifth of this volunteer-run server's capacity. A daily export of everything is at https://cdn.aws.bmlt.app/aggregator/manifest.json (see https://github.com/bmlt-enabled/aggregator/blob/main/docs/responsible-use.md). If it does not fit your needs, email admin@bmlt.app and we will help you get the data more efficiently, and unblock you."
     }
   }
 
