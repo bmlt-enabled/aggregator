@@ -179,6 +179,9 @@ resource "aws_athena_named_query" "create_requests_view" {
           THEN split_part(COALESCE(TRY(url_decode(url_extract_parameter(request_url, 'switcher'))), url_extract_parameter(request_url, 'switcher')), '&', 1)
         WHEN request_url LIKE '%meeting_ids%'                THEN 'meeting detail'
         WHEN request_url LIKE '%sort_results_by_next_start%' THEN 'virtual list'
+        -- a negative width means "the nearest N", never a map view, whether or not the fields are trimmed
+        -- (NA Meetings Near Me sends data_field_key on its nearest-200 search)
+        WHEN regexp_like(request_url, 'geo_width(_km)?=-')      THEN 'nearby search'
         -- data_field_key only means "trimmed response": without coordinates it is a lookup (e.g. BMLTSearch checking
         -- whether a service body has meetings of its own), not a map
         WHEN request_url LIKE '%data_field_key%' AND request_url NOT LIKE '%lat_val%' THEN 'trimmed list'
