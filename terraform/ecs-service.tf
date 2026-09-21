@@ -204,8 +204,11 @@ resource "aws_ecs_task_definition" "aggregator_import" {
             value = "true"
           },
           {
+            # Honest and not browser-like on purpose: bot protection (na.org.py) answers 403 to a browser
+            # user agent arriving from a datacenter address. Tested 200 against every reachable root server.
+            # Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:156.0) Gecko/20100101 Firefox/156.0 +aggregator
             name  = "AGGREGATOR_USER_AGENT"
-            value = "Mozilla/5.0 (X11; Linux x86_64; rv:146.0) Gecko/20100101 Firefox/146.0 +aggregator"
+            value = "BMLT-Aggregator/1.0 (+https://aggregator.bmltenabled.org)"
           },
           {
             name  = "LOG_CHANNEL"
@@ -287,6 +290,12 @@ resource "aws_ecs_service" "aggregator" {
   ordered_placement_strategy {
     type  = "spread"
     field = "attribute:ecs.availability-zone"
+  }
+
+  # without this two tasks can share one (larger) Spot host, and a single interruption takes out 2 of 3
+  ordered_placement_strategy {
+    type  = "spread"
+    field = "instanceId"
   }
 
   lifecycle {
