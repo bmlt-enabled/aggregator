@@ -8,9 +8,7 @@
 *.tfstate.backup
 venv
 *.zip
-docs/*
-!docs/responsible-use.md
-
+docs/
 CONTAINER_INSIGHTS_FINDINGS.md
 EXPENSIVE_QUERIES.md
 EXPENSIVE_QUERIES.pdf
