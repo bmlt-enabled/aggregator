@@ -48,6 +48,76 @@ resource "aws_glue_catalog_table" "geoip_raw" {
   }
 }
 
+# One Parquet row per request, UNLOADed daily by the lambda under s3://stats/facts/day=YYYY-MM-DD/, for
+# ad-hoc querying with DuckDB or Athena. No client IPs; coordinates rounded to 1 decimal, like the JSON.
+# Partition projection means no crawler: always filter on `day` (e.g. WHERE day >= DATE '2026-09-01').
+#   DuckDB:  SELECT * FROM read_parquet('s3://<bucket>/facts/*/*.parquet', hive_partitioning = true)
+resource "aws_glue_catalog_table" "aggregator_facts" {
+  name          = "aggregator_facts"
+  database_name = aws_glue_catalog_database.aggregator_logs.name
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    "EXTERNAL"                  = "TRUE"
+    "classification"            = "parquet"
+    "projection.enabled"        = "true"
+    "projection.day.type"       = "date"
+    "projection.day.range"      = "2022-12-08,NOW"
+    "projection.day.format"     = "yyyy-MM-dd"
+    "projection.day.interval"   = "1"
+    "projection.day.unit"       = "DAYS"
+    "storage.location.template" = "s3://${aws_s3_bucket.stats.id}/facts/day=$${day}"
+  }
+
+  partition_keys {
+    name = "day"
+    type = "string"
+  }
+
+  storage_descriptor {
+    location      = "s3://${aws_s3_bucket.stats.id}/facts/"
+    input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+      parameters            = { "serialization.format" = "1" }
+    }
+
+    dynamic "columns" {
+      for_each = [
+        ["ts", "timestamp"],
+        ["hour", "int"],
+        ["domain_name", "string"],
+        ["user_agent", "string"],
+        ["elb_status_code", "int"],
+        ["target_processing_time", "double"],
+        ["sent_bytes", "bigint"],
+        ["path", "string"],
+        ["switcher", "string"],
+        ["calling_app", "string"],
+        ["search_lat", "double"],
+        ["search_lng", "double"],
+        ["geo_width_km", "double"],
+        ["geo_width_mi", "double"],
+        ["app", "string"],
+        ["app_version", "string"],
+        ["app_os", "string"],
+        ["request_kind", "string"],
+        ["geo_country", "string"],
+        ["geo_region", "string"],
+        ["geo_city", "string"],
+        ["geo_lat", "double"],
+        ["geo_lng", "double"],
+      ]
+      content {
+        name = columns.value[0]
+        type = columns.value[1]
+      }
+    }
+  }
+}
+
 data "archive_file" "stats_lambda" {
   type        = "zip"
   source_file = "stats_lambda.py"
@@ -98,6 +168,27 @@ resource "aws_lambda_permission" "stats_daily" {
   function_name = aws_lambda_function.stats.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.stats_daily.arn
+}
+
+# 03:30 UTC: write yesterday's Parquet facts, after the 03:00 JSON rollup. Decoupled so a JSON
+# backfill stays fast; facts are backfilled with {"facts": true, "start": "...", "end": "..."}.
+resource "aws_cloudwatch_event_rule" "stats_facts" {
+  name                = "aggregator-stats-facts"
+  schedule_expression = "cron(30 3 * * ? *)"
+}
+
+resource "aws_cloudwatch_event_target" "stats_facts" {
+  rule  = aws_cloudwatch_event_rule.stats_facts.name
+  arn   = aws_lambda_function.stats.arn
+  input = jsonencode({ facts = true })
+}
+
+resource "aws_lambda_permission" "stats_facts" {
+  statement_id  = "AggregatorStatsFacts"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.stats.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.stats_facts.arn
 }
 
 # DB-IP publishes a new file at the start of each month.

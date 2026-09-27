@@ -6,14 +6,24 @@ writes the aggregates to S3 as JSON for the stats frontend.
   stats/index.json              one summary row per day, for trend charts
   stats/monthly/YYYY-MM.json    the month's daily files merged (no Athena), for long ranges;
                                 rebuilt for every month a run touches, or all of them with {"monthly": true}
+  facts/day=YYYY-MM-DD/*.parquet  one row per request (Glue table aggregator_facts) for ad-hoc DuckDB/Athena
 
-No client IPs are written anywhere, only counts.
+No client IPs are written anywhere, only counts (facts included; coordinates rounded to 1 decimal there too).
 
-Invoke with no payload for yesterday (UTC), or backfill with
+The headline counts in index.json exclude EXCLUDED_CITIES (Google's Mountain View, which spikes after every
+Android release); the geo/clients/user-agent breakdowns keep them, and the frontend filters the same list.
+
+Invoke with no payload for yesterday's JSON rollup (UTC), or backfill with
   {"day": "2026-09-18"}  or  {"start": "2026-09-06", "end": "2026-09-18"}
+
+{"facts": true} (scheduled daily, after the rollup) writes the Parquet facts for yesterday; back it
+fill the same way, {"facts": true, "start": "...", "end": "..."}. It is decoupled from the JSON rollup
+so a JSON backfill stays fast and facts can go as far back as the ALB logs, independent of the dashboard.
 
 {"geoip": true} (scheduled monthly) refreshes the GeoIP table from DB-IP's free
 "IP to City Lite" CSV (CC BY 4.0: the frontend must credit "IP Geolocation by DB-IP").
+
+Ranges are capped at MAX_BACKFILL_DAYS per invocation; loop for longer spans.
 """
 import json
 import os
@@ -26,6 +36,7 @@ import boto3
 
 athena = boto3.client("athena")
 s3 = boto3.client("s3")
+glue = boto3.client("glue")
 
 WORKGROUP = os.environ["WORKGROUP"]
 DATABASE = os.environ["DATABASE"]
@@ -48,6 +59,16 @@ APPS = {
 # app_active's 30-day window is most of a day's scan, so backfills skip them.
 APP_LAUNCH = min(launch for _, launch in APPS.values())
 APP_ONLY = {"app_active", "app_versions"}
+# (country, region, city) whose client IPs are dropped from the summary/index counts: office or cloud
+# locations that are bots, not users. Google's Mountain View spikes after every Android release (Play
+# pre-launch testing and review). Only the headline numbers (index.json) exclude these; the geo/clients/
+# user-agent breakdowns keep them, and the frontend drops the same list from its place lists and map
+# (src/lib/data.ts EXCLUDED_PLACES in aggregator-stats — keep the two in sync). Needs the GeoIP table:
+# when it is absent the exclusion is silently skipped, like the geo query.
+EXCLUDED_CITIES = [("US", "California", "Mountain View")]
+# Per-request facts UNLOADed to Parquet under this prefix, partitioned by day, for ad-hoc DuckDB/Athena
+# queries (Glue table aggregator_facts in stats.tf). No client IPs; coordinates rounded to 1 decimal.
+FACTS_PREFIX = "facts/"
 
 IP_INT = """(CAST(split_part({c}, '.', 1) AS bigint) * 16777216 + CAST(split_part({c}, '.', 2) AS bigint) * 65536
              + CAST(split_part({c}, '.', 3) AS bigint) * 256 + CAST(split_part({c}, '.', 4) AS bigint))"""
@@ -74,7 +95,9 @@ def per_app(template, sep=",\n               "):
 
 # {day} is the ALB partition value (yyyy/MM/dd); {day7}/{day30} are trailing-window starts.
 QUERIES = {
+    # {excl_*} drop the EXCLUDED_CITIES client IPs (filled by rollup; empty when GeoIP is absent).
     "summary": """
+        WITH day_rows AS (SELECT * FROM aggregator_requests WHERE day = '{day}'){excl_cte}
         SELECT count(*) AS requests,
                count(DISTINCT client_ip) AS unique_ips,
                count_if(elb_status_code >= 500) AS errors_5xx,
@@ -88,12 +111,15 @@ QUERIES = {
                count(DISTINCT IF(app = '{name}' AND app_os = 'Android', client_ip)) AS {p}_unique_ips_android,
                count_if(app = '{name}' AND elb_status_code >= 500) AS {p}_errors_5xx,
                count_if(app = '{name}' AND elb_status_code = 500) AS {p}_errors_500""") + """
-        FROM aggregator_requests WHERE day = '{day}'
+        FROM day_rows r {excl_join}
+        {excl_where}
     """,
     "app_active": """
+        WITH win AS (SELECT * FROM aggregator_requests WHERE day BETWEEN '{day30}' AND '{day}' AND app IS NOT NULL){excl_cte_win}
         SELECT """ + per_app("""count(DISTINCT IF(app = '{name}' AND day >= '{{day7}}', client_ip)) AS {p}_unique_ips_7d,
                count(DISTINCT IF(app = '{name}', client_ip)) AS {p}_unique_ips_30d""") + """
-        FROM aggregator_requests WHERE day BETWEEN '{day30}' AND '{day}' AND app IS NOT NULL
+        FROM win r {excl_join}
+        {excl_where}
     """,
     "clients": """
         SELECT coalesce(app, calling_app, '(none)') AS client,
@@ -156,6 +182,60 @@ QUERIES = {
     """,
 }
 
+# One Parquet row per request for ad-hoc querying (Glue table aggregator_facts). No client IPs, and
+# coordinates rounded to 1 decimal like the JSON. {geo_*} add the GeoIP columns when the table exists.
+FACTS_UNLOAD = """
+    UNLOAD (
+      WITH day_rows AS (SELECT * FROM aggregator_requests WHERE day = '{day}'){geo_cte}
+      SELECT ts, CAST(hour(ts) AS integer) AS hour, domain_name, user_agent, elb_status_code,
+             target_processing_time, sent_bytes, path, switcher, calling_app,
+             round(lat, 1) AS search_lat, round(lng, 1) AS search_lng, geo_width_km, geo_width_mi,
+             app, app_version, app_os, request_kind{geo_cols}
+      FROM day_rows r {geo_join}
+    )
+    TO '{location}'
+    WITH (format = 'PARQUET', compression = 'SNAPPY')
+"""
+
+
+def excluded_values():
+    """EXCLUDED_CITIES as a SQL VALUES list of (country, region, city) rows."""
+    return ", ".join("('%s', '%s', '%s')" % city for city in EXCLUDED_CITIES)
+
+
+def mv_cte(base):
+    """A `, mv AS (...)` CTE of the EXCLUDED_CITIES client IPs among `base`'s rows, for an anti-join."""
+    return f""", mv AS (
+              SELECT DISTINCT ip
+              FROM (SELECT client_ip AS ip, {IP_INT.format(c='client_ip')} AS ip_int FROM {base} WHERE client_ip NOT LIKE '%:%') d
+              JOIN geoip g ON g.bucket = d.ip_int / 65536 AND d.ip_int BETWEEN g.ip_from AND g.ip_to
+              WHERE (g.country, g.region, g.city) IN (VALUES {excluded_values()}))"""
+
+
+def facts_geo(geoip_present):
+    """(cte, columns, join) that add GeoIP columns to the facts UNLOAD, or NULL columns when absent."""
+    if not geoip_present:
+        return ("", (", CAST(NULL AS varchar) AS geo_country, CAST(NULL AS varchar) AS geo_region,"
+                     " CAST(NULL AS varchar) AS geo_city, CAST(NULL AS double) AS geo_lat, CAST(NULL AS double) AS geo_lng"), "")
+    cte = f""", ip_geo AS (
+              SELECT ip, arbitrary(g.country) AS country, arbitrary(g.region) AS region, arbitrary(g.city) AS city,
+                     arbitrary(g.lat) AS lat, arbitrary(g.lng) AS lng
+              FROM (SELECT client_ip AS ip, {IP_INT.format(c='client_ip')} AS ip_int FROM day_rows WHERE client_ip NOT LIKE '%:%') d
+              JOIN geoip g ON g.bucket = d.ip_int / 65536 AND d.ip_int BETWEEN g.ip_from AND g.ip_to
+              GROUP BY ip)"""
+    cols = (", x.country AS geo_country, x.region AS geo_region, x.city AS geo_city,"
+            " round(x.lat, 1) AS geo_lat, round(x.lng, 1) AS geo_lng")
+    return (cte, cols, "LEFT JOIN ip_geo x ON x.ip = r.client_ip")
+
+
+def geoip_ready():
+    """Whether the GeoIP table exists yet (built by the monthly {"geoip": true} run)."""
+    try:
+        glue.get_table(DatabaseName=DATABASE, Name="geoip")
+        return True
+    except glue.exceptions.EntityNotFoundException:
+        return False
+
 
 def start(sql):
     return athena.start_query_execution(
@@ -199,13 +279,20 @@ def rows(query_id):
     return out
 
 
-def rollup(day):
+def rollup(day, geoip_present):
     fmt = "%Y/%m/%d"
+    # Anti-join the excluded cities out of the headline counts, or leave the queries plain when GeoIP is absent.
+    join = "LEFT JOIN mv ON mv.ip = r.client_ip" if geoip_present else ""
+    where = "WHERE mv.ip IS NULL" if geoip_present else ""
     params = {
         "ip_int": IP_INT.format(c="client_ip"),
         "day": day.strftime(fmt),
         "day7": (day - timedelta(days=6)).strftime(fmt),
         "day30": (day - timedelta(days=29)).strftime(fmt),
+        "excl_cte": mv_cte("day_rows") if geoip_present else "",
+        "excl_cte_win": mv_cte("win") if geoip_present else "",
+        "excl_join": join,
+        "excl_where": where,
     }
     queries = {name: sql for name, sql in QUERIES.items() if day >= APP_LAUNCH or name not in APP_ONLY}
     running = {name: start(sql.format(**params)) for name, sql in queries.items()}
@@ -232,6 +319,25 @@ def rollup(day):
     }
     put(f"stats/daily/{day.isoformat()}.json", doc)
     return summary
+
+
+def clear_prefix(prefix):
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=STATS_BUCKET, Prefix=prefix):
+        objs = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+        if objs:
+            s3.delete_objects(Bucket=STATS_BUCKET, Delete={"Objects": objs})
+
+
+def write_facts(day, geoip_present):
+    """UNLOAD one day of requests to Parquet for ad-hoc querying (aggregator_facts)."""
+    prefix = f"{FACTS_PREFIX}day={day.isoformat()}/"
+    clear_prefix(prefix)  # UNLOAD needs an empty destination, and this makes a backfill idempotent.
+    geo_cte, geo_cols, geo_join = facts_geo(geoip_present)
+    wait(start(FACTS_UNLOAD.format(
+        day=day.strftime("%Y/%m/%d"),
+        location=f"s3://{STATS_BUCKET}/{prefix}",
+        geo_cte=geo_cte, geo_cols=geo_cols, geo_join=geo_join,
+    )))
 
 
 def put(key, doc):
@@ -371,12 +477,8 @@ def refresh_geoip():
     return {"geoip": url}
 
 
-def lambda_handler(event, context):
-    event = event or {}
-    if event.get("geoip"):
-        return refresh_geoip()
-    if event.get("monthly"):
-        return {"months": build_months(load_index())}
+def event_days(event):
+    """The [first, last] range an event asks for (yesterday UTC by default), capped at MAX_BACKFILL_DAYS."""
     if "start" in event:
         first, last = date.fromisoformat(event["start"]), date.fromisoformat(event.get("end", event["start"]))
     elif "day" in event:
@@ -385,17 +487,41 @@ def lambda_handler(event, context):
         first = last = datetime.now(timezone.utc).date() - timedelta(days=1)
     if not 0 <= (last - first).days < MAX_BACKFILL_DAYS:
         raise ValueError(f"range must be 1-{MAX_BACKFILL_DAYS} days")
+    days, day = [], first
+    while day <= last:
+        days.append(day)
+        day += timedelta(days=1)
+    return days
 
-    # (Re)create the view from the saved query so its SQL lives in one place (athena.tf).
+
+def recreate_view():
+    """(Re)create the requests view from the saved query so its SQL lives in one place (athena.tf)."""
     view_sql = athena.get_named_query(NamedQueryId=VIEW_QUERY_ID)["NamedQuery"]["QueryString"]
     wait(start(view_sql))
 
+
+def lambda_handler(event, context):
+    event = event or {}
+    if event.get("geoip"):
+        return refresh_geoip()
+    if event.get("monthly"):
+        return {"months": build_months(load_index())}
+
+    days = event_days(event)
+    recreate_view()
+    # GeoIP presence doesn't change mid-run: check once and reuse for the excluded-city filter and facts.
+    geoip_present = geoip_ready()
+
+    if event.get("facts"):
+        for day in days:
+            write_facts(day, geoip_present)
+            print(f"facts {day.isoformat()}")
+        return {"facts": [d.isoformat() for d in days]}
+
     summaries = {}
-    day = first
-    while day <= last:
-        summaries[day.isoformat()] = rollup(day)
+    for day in days:
+        summaries[day.isoformat()] = rollup(day, geoip_present)
         print(json.dumps({"day": day.isoformat(), **summaries[day.isoformat()]}))
-        day += timedelta(days=1)
     index = update_index(summaries)
     build_months(index, {day[:7] for day in summaries})
     return {"days": list(summaries)}
