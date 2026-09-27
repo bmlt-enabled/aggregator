@@ -6,9 +6,11 @@ writes the aggregates to S3 as JSON for the stats frontend.
   stats/index.json              one summary row per day, for trend charts
   stats/monthly/YYYY-MM.json    the month's daily files merged (no Athena), for long ranges;
                                 rebuilt for every month a run touches, or all of them with {"monthly": true}
-  facts/day=YYYY-MM-DD/*.parquet  one row per request (Glue table aggregator_facts) for ad-hoc DuckDB/Athena
+  facts/day=YYYY-MM-DD/*.parquet  one raw row per request (Glue table aggregator_facts) for ad-hoc DuckDB/Athena
 
-No client IPs are written anywhere, only counts (facts included; coordinates rounded to 1 decimal there too).
+The JSON stats write no client IPs, only counts, with coordinates rounded to 1 decimal. The facts/ Parquet is
+the private analytics layer: it keeps client IPs and exact coordinates. CloudFront serves only app/ and
+stats/, so facts/ is reachable only with S3 credentials.
 
 The headline counts in index.json exclude EXCLUDED_CITIES (Google's Mountain View, which spikes after every
 Android release); the geo/clients/user-agent breakdowns keep them, and the frontend filters the same list.
@@ -67,7 +69,8 @@ APP_ONLY = {"app_active", "app_versions"}
 # when it is absent the exclusion is silently skipped, like the geo query.
 EXCLUDED_CITIES = [("US", "California", "Mountain View")]
 # Per-request facts UNLOADed to Parquet under this prefix, partitioned by day, for ad-hoc DuckDB/Athena
-# queries (Glue table aggregator_facts in stats.tf). No client IPs; coordinates rounded to 1 decimal.
+# queries (Glue table aggregator_facts in stats.tf). Private analytics layer: keeps client IPs and exact
+# coordinates (CloudFront doesn't serve facts/), unlike the JSON stats.
 FACTS_PREFIX = "facts/"
 
 IP_INT = """(CAST(split_part({c}, '.', 1) AS bigint) * 16777216 + CAST(split_part({c}, '.', 2) AS bigint) * 65536
@@ -182,14 +185,16 @@ QUERIES = {
     """,
 }
 
-# One Parquet row per request for ad-hoc querying (Glue table aggregator_facts). No client IPs, and
-# coordinates rounded to 1 decimal like the JSON. {geo_*} add the GeoIP columns when the table exists.
+# One raw Parquet row per request for ad-hoc querying (Glue table aggregator_facts). This is the private
+# analytics layer: it keeps client IPs and exact coordinates, unlike the JSON stats. It lives under facts/
+# in the stats bucket, which CloudFront does not serve (only app/ and stats/), so it stays S3-only.
+# {geo_*} add the GeoIP columns when the table exists.
 FACTS_UNLOAD = """
     UNLOAD (
       WITH day_rows AS (SELECT * FROM aggregator_requests WHERE day = '{day}'){geo_cte}
-      SELECT ts, CAST(hour(ts) AS integer) AS hour, domain_name, user_agent, elb_status_code,
+      SELECT client_ip, ts, CAST(hour(ts) AS integer) AS hour, domain_name, user_agent, elb_status_code,
              target_processing_time, sent_bytes, path, switcher, calling_app,
-             round(lat, 1) AS search_lat, round(lng, 1) AS search_lng, geo_width_km, geo_width_mi,
+             r.lat AS search_lat, r.lng AS search_lng, geo_width_km, geo_width_mi,
              app, app_version, app_os, request_kind{geo_cols}
       FROM day_rows r {geo_join}
     )
@@ -224,7 +229,7 @@ def facts_geo(geoip_present):
               JOIN geoip g ON g.bucket = d.ip_int / 65536 AND d.ip_int BETWEEN g.ip_from AND g.ip_to
               GROUP BY ip)"""
     cols = (", x.country AS geo_country, x.region AS geo_region, x.city AS geo_city,"
-            " round(x.lat, 1) AS geo_lat, round(x.lng, 1) AS geo_lng")
+            " x.lat AS geo_lat, x.lng AS geo_lng")
     return (cte, cols, "LEFT JOIN ip_geo x ON x.ip = r.client_ip")
 
 

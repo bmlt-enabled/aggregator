@@ -48,8 +48,9 @@ resource "aws_glue_catalog_table" "geoip_raw" {
   }
 }
 
-# One Parquet row per request, UNLOADed daily by the lambda under s3://stats/facts/day=YYYY-MM-DD/, for
-# ad-hoc querying with DuckDB or Athena. No client IPs; coordinates rounded to 1 decimal, like the JSON.
+# One raw Parquet row per request, UNLOADed daily by the lambda under s3://stats/facts/day=YYYY-MM-DD/, for
+# ad-hoc querying with DuckDB or Athena. Private analytics layer: keeps client IPs and exact coordinates
+# (CloudFront serves only app/ and stats/, so facts/ is S3-only), unlike the redacted JSON stats.
 # Partition projection means no crawler: always filter on `day` (e.g. WHERE day >= DATE '2026-09-01').
 #   DuckDB:  SELECT * FROM read_parquet('s3://<bucket>/facts/*/*.parquet', hive_partitioning = true)
 resource "aws_glue_catalog_table" "aggregator_facts" {
@@ -86,6 +87,7 @@ resource "aws_glue_catalog_table" "aggregator_facts" {
 
     dynamic "columns" {
       for_each = [
+        ["client_ip", "string"],
         ["ts", "timestamp"],
         ["hour", "int"],
         ["domain_name", "string"],
