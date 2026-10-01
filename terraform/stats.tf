@@ -52,7 +52,8 @@ resource "aws_glue_catalog_table" "geoip_raw" {
 # ad-hoc querying with DuckDB or Athena. Private analytics layer: keeps client IPs and exact coordinates
 # (CloudFront serves only app/ and stats/, so facts/ is S3-only), unlike the redacted JSON stats.
 # Partition projection means no crawler: always filter on `day` (e.g. WHERE day >= DATE '2026-09-01').
-#   DuckDB:  SELECT * FROM read_parquet('s3://<bucket>/facts/*/*.parquet', hive_partitioning = true)
+#   DuckDB:  SELECT * FROM read_parquet('s3://<bucket>/facts/*/*', hive_partitioning = true)
+#            (UNLOAD writes files with no .parquet extension, so glob '*/*', not '*/*.parquet')
 resource "aws_glue_catalog_table" "aggregator_facts" {
   name          = "aggregator_facts"
   database_name = aws_glue_catalog_database.aggregator_logs.name

@@ -288,3 +288,92 @@ resource "aws_athena_named_query" "daily_traffic" {
     ORDER BY day DESC, requests DESC
   EOT
 }
+
+# CloudFront standard logs for cdn.aws.bmlt.app (enabled in terraform-top-level, cdn.tf), mainly to see who uses
+# the aggregator export. CloudFront writes flat hourly files with no date prefixes, so there is nothing to project
+# and every query reads the whole prefix; at ~1.5k requests a day that is still fractions of a cent.
+# cs_user_agent and cs_uri_query are URL-encoded: wrap them in url_decode().
+resource "aws_glue_catalog_table" "cdn_access_logs" {
+  name          = "cdn_access_logs"
+  database_name = aws_glue_catalog_database.aggregator_logs.name
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    "EXTERNAL"               = "TRUE"
+    "skip.header.line.count" = "2"
+  }
+
+  storage_descriptor {
+    location      = "s3://${data.aws_s3_bucket.alb_logs.id}/cloudfront/cdn.aws.bmlt.app/"
+    input_format  = "org.apache.hadoop.mapred.TextInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe"
+      parameters = {
+        "field.delim"          = "\t"
+        "serialization.format" = "\t"
+      }
+    }
+
+    dynamic "columns" {
+      for_each = [
+        ["date", "date"],
+        ["time", "string"],
+        ["x_edge_location", "string"],
+        ["sc_bytes", "bigint"],
+        ["c_ip", "string"],
+        ["cs_method", "string"],
+        ["cs_host", "string"],
+        ["cs_uri_stem", "string"],
+        ["sc_status", "int"],
+        ["cs_referer", "string"],
+        ["cs_user_agent", "string"],
+        ["cs_uri_query", "string"],
+        ["cs_cookie", "string"],
+        ["x_edge_result_type", "string"],
+        ["x_edge_request_id", "string"],
+        ["x_host_header", "string"],
+        ["cs_protocol", "string"],
+        ["cs_bytes", "bigint"],
+        ["time_taken", "double"],
+        ["x_forwarded_for", "string"],
+        ["ssl_protocol", "string"],
+        ["ssl_cipher", "string"],
+        ["x_edge_response_result_type", "string"],
+        ["cs_protocol_version", "string"],
+        ["fle_status", "string"],
+        ["fle_encrypted_fields", "string"],
+        ["c_port", "int"],
+        ["time_to_first_byte", "double"],
+        ["x_edge_detailed_result_type", "string"],
+        ["sc_content_type", "string"],
+        ["sc_content_len", "bigint"],
+        ["sc_range_start", "bigint"],
+        ["sc_range_end", "bigint"],
+      ]
+      content {
+        name = columns.value[0]
+        type = columns.value[1]
+      }
+    }
+  }
+}
+
+resource "aws_athena_named_query" "export_consumers" {
+  name      = "export: who fetches the aggregator export (last 30 days)"
+  workgroup = aws_athena_workgroup.aggregator.name
+  database  = aws_glue_catalog_database.aggregator_logs.name
+  query     = <<-EOT
+    SELECT url_decode(cs_user_agent) AS user_agent, c_ip,
+           count_if(cs_uri_stem = '/aggregator/manifest.json') AS manifests,
+           count_if(cs_uri_stem LIKE '/aggregator/meetings/%') AS files,
+           count(DISTINCT date) AS days, min(date) AS first_day, max(date) AS last_day,
+           round(sum(sc_bytes) / 1e6, 1) AS mb
+    FROM cdn_access_logs
+    WHERE date >= current_date - interval '30' day
+      AND cs_uri_stem LIKE '/aggregator/%'
+    GROUP BY 1, 2
+    ORDER BY manifests DESC, files DESC
+  EOT
+}
