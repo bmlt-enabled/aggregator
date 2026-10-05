@@ -60,7 +60,7 @@ APPS = {
 # Queries that only look at app traffic. Before the first launch they can only return zeros, and
 # app_active's 30-day window is most of a day's scan, so backfills skip them.
 APP_LAUNCH = min(launch for _, launch in APPS.values())
-APP_ONLY = {"app_active", "app_versions"}
+APP_ONLY = {"app_active", "app_new", "app_versions"}
 # (country, region, city) whose client IPs are dropped from the summary/index counts: office or cloud
 # locations that are bots, not users. Google's Mountain View spikes after every Android release (Play
 # pre-launch testing and review). Only the headline numbers (index.json) exclude these; the geo/clients/
@@ -122,6 +122,21 @@ QUERIES = {
         SELECT """ + per_app("""count(DISTINCT IF(app = '{name}' AND day >= '{{day7}}', client_ip)) AS {p}_unique_ips_7d,
                count(DISTINCT IF(app = '{name}', client_ip)) AS {p}_unique_ips_30d""") + """
         FROM win r {excl_join}
+        {excl_where}
+    """,
+    # IPs the app sees for the first time since launch: the day's app IPs absent from every earlier day of
+    # facts/ (two Parquet columns, so a cheap scan however long the history gets). Each IP is new on one day
+    # only, so unlike unique_ips these sum across days. Needs facts for the days before {day}: the daily
+    # facts run is a day behind the rollup, which is enough. New to each app, so one IP can be new to both.
+    "app_new": """
+        WITH day_rows AS (SELECT * FROM aggregator_requests WHERE day = '{day}' AND app IS NOT NULL){excl_cte},
+        seen AS (
+          SELECT DISTINCT app, client_ip FROM aggregator_facts
+          WHERE day >= '{launch}' AND day < '{day_iso}' AND app IS NOT NULL
+        )
+        SELECT """ + per_app("count(DISTINCT IF(r.app = '{name}' AND s.client_ip IS NULL, r.client_ip)) AS {p}_new_ips") + """
+        FROM day_rows r {excl_join}
+        LEFT JOIN seen s ON s.app = r.app AND s.client_ip = r.client_ip
         {excl_where}
     """,
     "clients": """
@@ -292,6 +307,8 @@ def rollup(day, geoip_present):
     params = {
         "ip_int": IP_INT.format(c="client_ip"),
         "day": day.strftime(fmt),
+        "day_iso": day.isoformat(),  # facts/ partitions are yyyy-MM-dd
+        "launch": APP_LAUNCH.isoformat(),
         "day7": (day - timedelta(days=6)).strftime(fmt),
         "day30": (day - timedelta(days=29)).strftime(fmt),
         "excl_cte": mv_cte("day_rows") if geoip_present else "",
@@ -315,7 +332,8 @@ def rollup(day, geoip_present):
 
     results.setdefault("app_versions", [])
     app_active = results.pop("app_active", [{f"{p}_unique_ips_{window}": 0 for p in APPS for window in ("7d", "30d")}])[0]
-    summary = {**results.pop("summary")[0], **app_active}
+    app_new = results.pop("app_new", [{f"{p}_new_ips": 0 for p in APPS}])[0]
+    summary = {**results.pop("summary")[0], **app_active, **app_new}
     doc = {
         "day": day.isoformat(),
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
