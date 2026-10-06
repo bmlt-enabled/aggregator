@@ -232,7 +232,7 @@ resource "aws_athena_named_query" "app_search_locations" {
   workgroup = aws_athena_workgroup.aggregator.name
   database  = aws_glue_catalog_database.aggregator_logs.name
   query     = <<-EOT
-    SELECT app, round(lat, 1) AS lat, round(lng, 1) AS lng, count(*) AS searches, count(DISTINCT client_ip) AS unique_ips
+    SELECT app, round(lat, 4) AS lat, round(lng, 4) AS lng, count(*) AS searches, count(DISTINCT client_ip) AS unique_ips
     FROM aggregator_requests
     WHERE day >= date_format(current_date - interval '30' day, '%Y/%m/%d')
       AND app IS NOT NULL
@@ -257,14 +257,14 @@ resource "aws_athena_named_query" "requests_by_client" {
   EOT
 }
 
-# Searches carry the user's coordinates, which beats GeoIP. Rounded to 1 decimal (~11km)
-# so this is a heatmap of areas, not of people.
+# Searches carry the user's coordinates, which beats GeoIP. Rounded to 4 decimals (~11m) so repeat
+# searches from one spot group together.
 resource "aws_athena_named_query" "search_locations" {
   name      = "search locations heatmap (last 30 days)"
   workgroup = aws_athena_workgroup.aggregator.name
   database  = aws_glue_catalog_database.aggregator_logs.name
   query     = <<-EOT
-    SELECT round(lat, 1) AS lat, round(lng, 1) AS lng, count(*) AS searches, count(DISTINCT client_ip) AS unique_ips
+    SELECT round(lat, 4) AS lat, round(lng, 4) AS lng, count(*) AS searches, count(DISTINCT client_ip) AS unique_ips
     FROM aggregator_requests
     WHERE day >= date_format(current_date - interval '30' day, '%Y/%m/%d')
       AND switcher = 'GetSearchResults'

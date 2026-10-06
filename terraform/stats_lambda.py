@@ -8,9 +8,10 @@ writes the aggregates to S3 as JSON for the stats frontend.
                                 rebuilt for every month a run touches, or all of them with {"monthly": true}
   facts/day=YYYY-MM-DD/*.parquet  one raw row per request (Glue table aggregator_facts) for ad-hoc DuckDB/Athena
 
-The JSON stats write no client IPs, only counts, with coordinates rounded to 1 decimal. The facts/ Parquet is
-the private analytics layer: it keeps client IPs and exact coordinates. CloudFront serves only app/ and
-stats/, so facts/ is reachable only with S3 credentials.
+The JSON stats write no client IPs, only counts. Search coordinates are rounded to 4 decimals (~11m, about a
+phone's GPS accuracy) so repeat searches from one spot group; they are effectively exact, and the site is private
+(basic auth, two admins). The facts/ Parquet is the private analytics layer: it keeps client IPs and exact
+coordinates. CloudFront serves only app/ and stats/, so facts/ is reachable only with S3 credentials.
 
 The headline counts in index.json exclude EXCLUDED_CITIES (Google's Mountain View, which spikes after every
 Android release); the geo/clients/user-agent breakdowns keep them, and the frontend filters the same list.
@@ -173,13 +174,13 @@ QUERIES = {
         FROM aggregator_requests WHERE day = '{day}'
         GROUP BY 1 ORDER BY 1
     """,
-    # 1 decimal place is ~11km: areas, not people.
+    # 4 decimal places is ~11m: where people actually searched. ~4.7k points a day (Oct 2026), ~330 of them the apps'.
     "locations": """
-        SELECT round(lat, 1) AS lat, round(lng, 1) AS lng, count(*) AS searches,
+        SELECT round(lat, 4) AS lat, round(lng, 4) AS lng, count(*) AS searches,
                """ + per_app("count_if(app = '{name}') AS {p}_searches") + """
         FROM aggregator_requests
         WHERE day = '{day}' AND lat BETWEEN -90 AND 90 AND lng BETWEEN -180 AND 180
-        GROUP BY 1, 2 ORDER BY searches DESC LIMIT 3000
+        GROUP BY 1, 2 ORDER BY searches DESC LIMIT 20000
     """,
     # Where requests come from by client IP (rough: mobile carriers route through a few cities).
     "geo": """
@@ -412,6 +413,12 @@ MONTHLY_FROM = {"ip_days": "unique_ips", **{f"{p}_ip_days": f"{p}_unique_ips" fo
 MONTHLY_LIMIT = 3000
 
 
+def keep_in_month(name, item):
+    """Rows kept past MONTHLY_LIMIT. A month has ~100k distinct search points, nearly all single searches, so the
+    cap would drop the apps' points at random behind busier website ones; keep every point an app searched from."""
+    return name == "locations" and any(item.get(f"{p}_searches") for p in APPS)
+
+
 def build_month(month, days):
     """Merge a month's daily files into stats/monthly/YYYY-MM.json so long ranges load one file per month."""
     totals = {name: {} for name in MONTHLY}
@@ -435,7 +442,8 @@ def build_month(month, days):
     merged = {}
     for name, (keys, sums) in MONTHLY.items():
         items = [{**dict(zip(keys, key)), **total} for key, total in totals[name].items()]
-        merged[name] = sorted(items, key=lambda i: -i[sums[0]])[:MONTHLY_LIMIT]
+        ranked = sorted(items, key=lambda i: -i[sums[0]])
+        merged[name] = ranked[:MONTHLY_LIMIT] + [i for i in ranked[MONTHLY_LIMIT:] if keep_in_month(name, i)]
     merged["hourly"].sort(key=lambda i: i["hour"])
     # Latencies are request-weighted means of the daily percentiles: an approximation, like the frontend's.
     merged["request_kinds"] = sorted(
