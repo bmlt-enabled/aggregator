@@ -367,13 +367,15 @@ resource "aws_athena_named_query" "export_consumers" {
   query     = <<-EOT
     SELECT url_decode(cs_user_agent) AS user_agent, c_ip,
            count_if(cs_uri_stem = '/aggregator/manifest.json') AS manifests,
-           count_if(cs_uri_stem LIKE '/aggregator/meetings/%') AS files,
+           count_if(cs_uri_stem = '/aggregator/meetings.ndjson.gz') AS full_dumps,
+           count_if(cs_uri_stem LIKE '/aggregator/meetings/%') AS per_root,
            count(DISTINCT date) AS days, min(date) AS first_day, max(date) AS last_day,
            round(sum(sc_bytes) / 1e6, 1) AS mb
     FROM cdn_access_logs
     WHERE date >= current_date - interval '30' day
       AND cs_uri_stem LIKE '/aggregator/%'
+      AND cs_uri_stem NOT LIKE '/aggregator/responsible-use%'
     GROUP BY 1, 2
-    ORDER BY manifests DESC, files DESC
+    ORDER BY full_dumps DESC, manifests DESC
   EOT
 }
