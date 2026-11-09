@@ -353,6 +353,8 @@ def rollup(day, geoip_present):
         results[name] = rows(query_id)
 
     results.setdefault("app_versions", [])
+    for h in results.get("harvesters", []):  # stamp the day so the row still knows it after the monthly merge
+        h["day"] = day.isoformat()
     app_active = results.pop("app_active", [{f"{p}_unique_ips_{window}": 0 for p in APPS for window in ("7d", "30d")}])[0]
     app_new = results.pop("app_new", [{f"{p}_new_ips": 0 for p in APPS}])[0]
     summary = {**results.pop("summary")[0], **app_active, **app_new}
@@ -444,8 +446,10 @@ def build_month(month, days):
     """Merge a month's daily files into stats/monthly/YYYY-MM.json so long ranges load one file per month."""
     totals = {name: {} for name in MONTHLY}
     kinds = {}
+    harvesters = []  # concatenated, not key-summed: each is one IP's anomalous day, already stamped with `day`.
     for day in days:
         doc = get(f"stats/daily/{day}.json")
+        harvesters.extend(doc.get("harvesters", []))
         for name, (keys, sums) in MONTHLY.items():
             for item in doc.get(name, []):
                 total = totals[name].setdefault(tuple(item.get(k) for k in keys), dict.fromkeys(sums, 0))
@@ -481,6 +485,7 @@ def build_month(month, days):
         ),
         key=lambda i: -i["requests"],
     )
+    merged["harvesters"] = sorted(harvesters, key=lambda h: -h["nearby_searches"])[:MONTHLY_LIMIT]
     put(f"stats/monthly/{month}.json", {
         "month": month,
         "days": days,
