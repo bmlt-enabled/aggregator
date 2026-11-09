@@ -98,6 +98,8 @@ def per_app(template, sep=",\n               "):
 
 
 # {day} is the ALB partition value (yyyy/MM/dd); {day7}/{day30} are trailing-window starts.
+HARVEST_NEARBY_PER_DAY = 2000  # one IP over this many "nearby" searches in a day is a grid scrape, not a person.
+
 QUERIES = {
     # {excl_*} drop the EXCLUDED_CITIES client IPs (filled by rollup; empty when GeoIP is absent).
     "summary": """
@@ -198,6 +200,24 @@ QUERIES = {
                """ + per_app("sum(n.{p}_requests) AS {p}_requests, count_if(n.{p}_requests > 0) AS {p}_unique_ips") + """
         FROM n LEFT JOIN geoip g ON g.bucket = n.ip_int / 65536 AND n.ip_int BETWEEN g.ip_from AND g.ip_to
         GROUP BY 1, 2, 3, 4, 5 ORDER BY requests DESC LIMIT 3000
+    """,
+    # Harvesters: a single client IP doing an abnormal number of "nearby" searches in one day is almost always a
+    # coordinate-grid scrape of the whole dataset (walk a lat/lng grid, ask "nearby" at each point), not a person.
+    # Flag any IP over {harvest_min}. The client IP never leaves this layer -- it is grouped by, never selected -- so
+    # the row carries only counts, the search bounding box, and the user_agent/calling_app already kept in the stats.
+    # The exact IP stays in the private facts/ table for when a flagged client needs chasing (whois, block).
+    "harvesters": """
+        SELECT count_if(request_kind = 'nearby search') AS nearby_searches,
+               count(*) AS requests,
+               count(DISTINCT concat(CAST(round(lat, 2) AS varchar), ',', CAST(round(lng, 2) AS varchar))) AS search_points,
+               round(min(lat), 1) AS min_lat, round(max(lat), 1) AS max_lat,
+               round(min(lng), 1) AS min_lng, round(max(lng), 1) AS max_lng,
+               arbitrary(user_agent) AS user_agent, max(calling_app) AS calling_app
+        FROM aggregator_requests
+        WHERE day = '{day}'
+        GROUP BY client_ip
+        HAVING count_if(request_kind = 'nearby search') >= {harvest_min}
+        ORDER BY nearby_searches DESC LIMIT 100
     """,
 }
 
@@ -308,6 +328,7 @@ def rollup(day, geoip_present):
     params = {
         "ip_int": IP_INT.format(c="client_ip"),
         "day": day.strftime(fmt),
+        "harvest_min": HARVEST_NEARBY_PER_DAY,
         "day_iso": day.isoformat(),  # facts/ partitions are yyyy-MM-dd
         "launch": APP_LAUNCH.isoformat(),
         "day7": (day - timedelta(days=6)).strftime(fmt),

@@ -1,3 +1,38 @@
+# Block a specific abusive client at the load balancer. source_ip matches the real TCP source address (not
+# X-Forwarded-For), which is what we want for a direct client. Priority 1 so it is evaluated before every other
+# rule. Blocked requests get a fixed response and never reach the target group, so they drop out of the stats.
+resource "aws_lb_listener_rule" "aggregator_block_ip" {
+  listener_arn = data.aws_lb_listener.main_443.arn
+  priority     = 1
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      status_code  = "403"
+      message_body = "Your client has been blocked for excessive load on this volunteer-run server. A daily export of everything is at https://cdn.aws.bmlt.app/aggregator/manifest.json (see https://cdn.aws.bmlt.app/aggregator/responsible-use.html). If that does not fit your needs, email admin@bmlt.app and we will help you get the data more efficiently, and unblock you."
+    }
+  }
+
+  condition {
+    host_header {
+      values = [
+        data.aws_route53_zone.aggregator_bmltenabled_org.name,
+        "aggregator.na-bmlt.org",
+        data.aws_route53_zone.tomato_bmltenabled_org.name,
+        "tomato.na-bmlt.org",
+      ]
+    }
+  }
+
+  condition {
+    source_ip {
+      values = ["76.138.131.237/32"]
+    }
+  }
+}
+
 resource "aws_lb_target_group" "aggregator" {
   name                 = "aggregator"
   port                 = 8000
