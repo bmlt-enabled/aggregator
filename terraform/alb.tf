@@ -1,3 +1,52 @@
+# Shared values for the client-block rules below. One 403 body and one host list, edited in one place.
+locals {
+  blocked_message = "Your client has been blocked for excessive load on this volunteer-run aggregator. The live API is reserved for NA service bodies; third-party apps and bulk consumers take their data from the daily export instead (terms: https://cdn.aws.bmlt.app/aggregator/tos.html). A daily export of everything is at https://cdn.aws.bmlt.app/aggregator/manifest.json (guide: https://cdn.aws.bmlt.app/aggregator/responsible-use.html). Email admin@bmlt.app and we will help you move to the export, and unblock you."
+
+  aggregator_hosts = [
+    data.aws_route53_zone.aggregator_bmltenabled_org.name,
+    "aggregator.na-bmlt.org",
+    data.aws_route53_zone.tomato_bmltenabled_org.name,
+    "tomato.na-bmlt.org",
+  ]
+
+  # One entry per client blocked by User-Agent; for_each below turns each into its own listener rule. They can't be
+  # folded into a single rule's values list: the ALB caps a rule at 5 condition values, and the 4 host_header values
+  # plus the UA pattern already use all 5. Priorities must stay distinct and clear of 4/6/7 (other stacks) and the
+  # 20+ forward rules. Remove an entry once that client has been in touch and moved to the export.
+  blocked_user_agents = {
+    # MeetingBoard: a third-party app querying the live API directly, which the terms reserve for NA service bodies.
+    meeting_board = { priority = 11, user_agent = "*MeetingBoard*" }
+
+    # sobriety-tools (sobriety.tools): pre-warms six hard-coded US metros at geo_width=800 km hourly with no caching
+    # (HARVESTERS.md, EXPENSIVE_QUERIES.md) — heaviest live-API client by bytes. No contact in its UA. Matched by UA,
+    # not IP: its addresses are Cloudflare egress.
+    sobriety_tools = { priority = 12, user_agent = "*sobriety-tools*" }
+
+    # narecovery-* (narecovery.org): an independent NA meeting directory ingesting under several narecovery- user
+    # agents (meeting-directory, feasibility-study, research, ingest). Also reachable at admin@narecovery.org.
+    narecovery = { priority = 13, user_agent = "*narecovery-*" }
+
+    # Navira: a third-party recovery app pulling large trimmed meeting lists (~286 MB/mo over ~694 requests — bulk
+    # regional pulls, not per-user searches). No contact in its UA.
+    navira = { priority = 14, user_agent = "*Navira*" }
+
+    # 12steps-meeting-ingest: a server-side ingest copying meeting data from the live API (~130 MB/mo from 3 IPs).
+    # Exact name so the sibling 12steps-meeting-research / 12steps-research / 12steps.life clients are left alone.
+    "12steps_ingest" = { priority = 15, user_agent = "*12steps-meeting-ingest*" }
+
+    # meeting-registry/0.1: downloads the whole dataset in 60 slices, 8x/day — 22% of all bytes and 19% of backend
+    # time (TOP_CLIENTS_FINDINGS.md, HARVESTERS.md). Its UA says "contact in repo README" but the repo is not public
+    # and the address is a bare VPS, so the response to its own requests is the only way to reach the operator.
+    meeting_registry = { priority = 16, user_agent = "meeting-registry/*" }
+
+    # MyMeetings: a server-side map-search harvester. Trivial at first (19 MB in Oct), it exploded to ~36k map
+    # requests / 447 MB / 11.6 backend-hours from just 10 IPs over Nov 8-10 — the heaviest named client by backend
+    # time, and almost entirely GetSearchResults map crawls. No contact in its UA.
+    mymeetings = { priority = 17, user_agent = "*MyMeetings*" }
+
+  }
+}
+
 # Block a specific abusive client at the load balancer. source_ip matches the real TCP source address (not
 # X-Forwarded-For), which is what we want for a direct client. Priority 1 so it is evaluated before every other
 # rule. Blocked requests get a fixed response and never reach the target group, so they drop out of the stats.
@@ -11,24 +60,49 @@ resource "aws_lb_listener_rule" "aggregator_block_ip" {
     fixed_response {
       content_type = "text/plain"
       status_code  = "403"
-      message_body = "Your client has been blocked for excessive load on this volunteer-run server. A daily export of everything is at https://cdn.aws.bmlt.app/aggregator/manifest.json (see https://cdn.aws.bmlt.app/aggregator/responsible-use.html). If that does not fit your needs, email admin@bmlt.app and we will help you get the data more efficiently, and unblock you."
+      message_body = local.blocked_message
     }
   }
 
   condition {
     host_header {
-      values = [
-        data.aws_route53_zone.aggregator_bmltenabled_org.name,
-        "aggregator.na-bmlt.org",
-        data.aws_route53_zone.tomato_bmltenabled_org.name,
-        "tomato.na-bmlt.org",
-      ]
+      values = local.aggregator_hosts
     }
   }
 
   condition {
     source_ip {
       values = ["76.138.131.237/32"]
+    }
+  }
+}
+
+# A second IP block, separate rule because the ALB caps a rule at 5 condition values and the 4 host_header
+# values plus one source_ip already fill rule above. 93.123.109.165: Bulgarian host spraying Laravel/admin
+# recon paths (/horizon, /telescope, /filament, /login, /install...), ~150 req in 6h, no BMLT API calls.
+resource "aws_lb_listener_rule" "aggregator_block_ip_2" {
+  listener_arn = data.aws_lb_listener.main_443.arn
+  priority     = 2
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      status_code  = "403"
+      message_body = local.blocked_message
+    }
+  }
+
+  condition {
+    host_header {
+      values = local.aggregator_hosts
+    }
+  }
+
+  condition {
+    source_ip {
+      values = ["93.123.109.165/32"]
     }
   }
 }
@@ -71,12 +145,7 @@ resource "aws_lb_listener_rule" "aggregator_xml_gone" {
 
   condition {
     host_header {
-      values = [
-        data.aws_route53_zone.aggregator_bmltenabled_org.name,
-        "aggregator.na-bmlt.org",
-        data.aws_route53_zone.tomato_bmltenabled_org.name,
-        "tomato.na-bmlt.org",
-      ]
+      values = local.aggregator_hosts
     }
   }
 
@@ -87,13 +156,13 @@ resource "aws_lb_listener_rule" "aggregator_xml_gone" {
   }
 }
 
-# meeting-registry/0.1 downloads the whole dataset in 60 slices, 8 times a day: 22% of all bytes and 19% of all
-# backend time from one client (TOP_CLIENTS_FINDINGS.md, HARVESTERS.md). Its user agent says "contact in repo
-# README" but the repo is not public and the address is a bare VPS, so the response to its own requests is the
-# only way to reach the operator. Remove this rule once they have been in touch and have a more efficient export.
-resource "aws_lb_listener_rule" "aggregator_meeting_registry" {
+# One fixed-response 403 per blocked User-Agent in local.blocked_user_agents. Blocked requests never reach the
+# target group, so they drop out of the stats. See that map for why each client is blocked.
+resource "aws_lb_listener_rule" "aggregator_ua_block" {
+  for_each = local.blocked_user_agents
+
   listener_arn = data.aws_lb_listener.main_443.arn
-  priority     = 2
+  priority     = each.value.priority
 
   action {
     type = "fixed-response"
@@ -101,61 +170,20 @@ resource "aws_lb_listener_rule" "aggregator_meeting_registry" {
     fixed_response {
       content_type = "text/plain"
       status_code  = "403"
-      message_body = "meeting-registry: your client downloads the full BMLT aggregator dataset 8 times a day, which is about a fifth of this volunteer-run server's capacity. A daily export of everything is at https://cdn.aws.bmlt.app/aggregator/manifest.json (see https://cdn.aws.bmlt.app/aggregator/responsible-use.html). If it does not fit your needs, email admin@bmlt.app and we will help you get the data more efficiently, and unblock you."
+      message_body = local.blocked_message
     }
   }
 
   condition {
     host_header {
-      values = [
-        data.aws_route53_zone.aggregator_bmltenabled_org.name,
-        "aggregator.na-bmlt.org",
-        data.aws_route53_zone.tomato_bmltenabled_org.name,
-        "tomato.na-bmlt.org",
-      ]
+      values = local.aggregator_hosts
     }
   }
 
   condition {
     http_header {
       http_header_name = "User-Agent"
-      values           = ["meeting-registry/*"]
-    }
-  }
-}
-
-# MeetingBoard: a third-party app querying the live API directly. The terms of use reserve the live API for NA
-# service bodies; everyone else takes their data from the daily export. Blocked at the ALB with a 403 pointing to
-# the terms and the export. Remove this rule once they have been in touch and moved to the export.
-resource "aws_lb_listener_rule" "aggregator_meeting_board" {
-  listener_arn = data.aws_lb_listener.main_443.arn
-  priority     = 11
-
-  action {
-    type = "fixed-response"
-
-    fixed_response {
-      content_type = "text/plain"
-      status_code  = "403"
-      message_body = "MeetingBoard: the live API of this volunteer-run aggregator is for NA service bodies; third-party apps take their data from the daily export instead. See the terms of use at https://cdn.aws.bmlt.app/aggregator/tos.html. The export of everything is at https://cdn.aws.bmlt.app/aggregator/manifest.json (guide: https://cdn.aws.bmlt.app/aggregator/responsible-use.html). Email admin@bmlt.app and we will help you move to the export, and unblock you."
-    }
-  }
-
-  condition {
-    host_header {
-      values = [
-        data.aws_route53_zone.aggregator_bmltenabled_org.name,
-        "aggregator.na-bmlt.org",
-        data.aws_route53_zone.tomato_bmltenabled_org.name,
-        "tomato.na-bmlt.org",
-      ]
-    }
-  }
-
-  condition {
-    http_header {
-      http_header_name = "User-Agent"
-      values           = ["*MeetingBoard*"]
+      values           = [each.value.user_agent]
     }
   }
 }
