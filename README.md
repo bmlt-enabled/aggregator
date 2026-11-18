@@ -1,61 +1,38 @@
 # aggregator
 
-The worldwide BMLT server aggregator (formerly tomato) uses the [BMLT Server](https://github.com/bmlt-enabled/bmlt-server) codebase. This repo contains the terraform for the aggregator infrastructure and the worldwide servers list [serverList.json](./serverList.json).
+The worldwide BMLT server aggregator (formerly *tomato*). It collects meeting data from
+BMLT root servers around the world into a single searchable instance running the
+[BMLT Server](https://github.com/bmlt-enabled/bmlt-server) codebase, served at
+**https://aggregator.bmltenabled.org**.
 
-## Architecture
+This repository holds the public list of root servers the aggregator imports from.
 
-```mermaid
-graph TB
-    subgraph "Root Servers Worldwide"
-        RS1["🌍 Aotearoa NZ<br/>bmlt.nzna.org"]
-        RS2["🌍 Greater NY<br/>bmlt.newyorkna.org"]
-        RS3["🌍 40+ other servers<br/>..."]
-    end
+## Server list
 
-    subgraph "AWS Infrastructure"
-        subgraph "ECS Cluster (EC2: t3a.small x2)"
-            INIT["⚙️ aggregator-init<br/>(Database Setup)"]
-            APP1["🚀 aggregator<br/>Task 1<br/>Port 8000"]
-            APP2["🚀 aggregator<br/>Task 2<br/>Port 8000"]
-            IMPORT["📥 aggregator-import<br/>(Scheduled: Every 4hrs)"]
-        end
-        
-        ALB["⚖️ Application Load Balancer"]
-        RDS["🗄️ RDS MySQL 8<br/>db.t3.micro<br/>100GB"]
-        CW["📊 CloudWatch<br/>Logs & Alarms"]
-        LAMBDA["λ Lambda Monitor<br/>(Task Failures)"]
-        SNS["📧 SNS Alerts"]
-    end
+[`serverList.json`](./serverList.json) is the canonical list of root servers. Each entry is:
 
-    subgraph "Public Access"
-        DNS1["🌐 aggregator.bmltenabled.org"]
-    end
-
-    RS1 -->|"Fetch Meetings"| IMPORT
-    RS2 -->|"Fetch Meetings"| IMPORT
-    RS3 -->|"Fetch Meetings"| IMPORT
-    
-    IMPORT -->|"Store Data"| RDS
-    INIT -->|"Initialize Schema"| RDS
-    APP1 -->|"Query"| RDS
-    APP2 -->|"Query"| RDS
-    
-    DNS1 --> ALB
-    ALB -->|"Route Traffic"| APP1
-    ALB -->|"Route Traffic"| APP2
-    
-    APP1 -.->|"Logs"| CW
-    APP2 -.->|"Logs"| CW
-    IMPORT -.->|"Logs"| CW
-    INIT -.->|"Logs"| CW
-    
-    CW -->|"Task Stopped Events"| LAMBDA
-    CW -->|"Health Alerts"| SNS
-    LAMBDA --> SNS
-
-    style IMPORT fill:#ffb3b3,stroke:#333,stroke-width:2px,color:#000
-    style APP1 fill:#b3d9ff,stroke:#333,stroke-width:2px,color:#000
-    style APP2 fill:#b3d9ff,stroke:#333,stroke-width:2px,color:#000
-    style INIT fill:#ffe6b3,stroke:#333,stroke-width:2px,color:#000
-    style RDS fill:#b3ffb3,stroke:#333,stroke-width:2px,color:#000
+```json
+{ "id": "102", "name": "Greater New York Server", "url": "https://bmlt.newyorkna.org/main_server/" }
 ```
+
+- `id` — stable numeric identifier for the server (don't reuse an id).
+- `name` — human-readable region name.
+- `url` — the root server's base URL.
+
+It is consumed directly over HTTPS by downstream tools, so keep the shape and the path
+stable:
+
+```
+https://raw.githubusercontent.com/bmlt-enabled/aggregator/main/serverList.json
+```
+
+### Adding or changing a server
+
+1. Add or edit the entry in `serverList.json` (keep it valid JSON; one object per line).
+2. Open a pull request. Once it's merged to `main`, the raw URL above updates and
+   importers pick it up on their next run.
+
+## Responsible use
+
+Need the whole dataset? Please use the daily export instead of scraping the live service:
+see **https://cdn.aws.bmlt.app/aggregator/responsible-use.html**.
